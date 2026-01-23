@@ -1,0 +1,16 @@
+[Unit]
+Description=Galera Cluster Status Checker
+After=network.target mysql.service
+Requires=mysql.service
+
+[Service]
+Type=simple
+User=clustercheck
+Group=clustercheck
+WorkingDirectory=/opt/clustercheck
+ExecStart=/opt/clustercheck/clustercheck
+EnvironmentFile=/etc/clustercheck/config
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
