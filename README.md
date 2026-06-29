@@ -3,6 +3,46 @@
 This Go service provides an HTTP endpoint to check the status of a Galera cluster node by querying its `wsrep_local_state`. It returns an HTTP 200 (OK) if the node is synced (`wsrep_local_state` is `4`), and an HTTP 503 (Service Unavailable) if it is desynced. 
 This is intended to be used with load balancers like HAProxy and in place of a cluster-check bash script executed by `xinetd` or `systemd-socket-proxyd`.
 
+## Endpoints
+
+### `GET /`
+
+Checks Galera node sync state:
+
+* `200 OK`: node is synced (`wsrep_local_state=4`)
+* `503 Service Unavailable`: node is not synced
+
+### `GET /cluster`
+
+Checks overall Galera cluster health:
+
+* `200 OK`: cluster is Primary, this node is connected/ready/synced, and `wsrep_cluster_size` matches `EXPECTED_CLUSTER_SIZE`
+* `503 Service Unavailable`: cluster status is unhealthy, this node is not synced/ready/connected, or the online member count does not match `EXPECTED_CLUSTER_SIZE`
+* `500 Internal Server Error`: cluster status data collection failed
+
+The payload includes `state`, `status`, `expected_cluster_size`, `cluster_size`, and the checked `wsrep_*` status variables.
+
+### `GET /storage`
+
+Returns storage/filesystem state and status as JSON.  
+The payload includes an overall `state`/`status` plus per-filesystem entries with mount point, type, capacity, utilization, and per-filesystem `state`/`status`.
+
+Response codes:
+
+* `200 OK`: storage checks are healthy or warning-level
+* `503 Service Unavailable`: one or more filesystems are critical/error
+* `500 Internal Server Error`: storage data collection failed
+
+### `GET /valkey`
+
+Checks a Valkey primary/replica deployment monitored by Valkey Sentinel:
+
+* `200 OK`: Sentinel quorum is OK, the expected data-node count is present, Sentinel does not report down/disconnected node flags, and every reported data node responds to `PING`
+* `503 Service Unavailable`: Sentinel cannot verify quorum, node count is wrong, Sentinel reports an unhealthy node flag, or a data node does not respond to `PING`
+* `500 Internal Server Error`: Valkey health data collection failed
+
+The payload includes `state`, `status`, `master_name`, `expected_nodes`, `nodes`, `sentinels`, and `checks`.
+
 ## Prerequisites
 
 *   Go (version 1.25 or later recommended)
@@ -69,6 +109,18 @@ Add the following line to the file:
 
 ```
 DSN="cluster_monitor:password@tcp(127.0.0.1:3306)/"
+EXPECTED_CLUSTER_SIZE="3"
+VALKEY_SENTINEL_ADDRS="127.0.0.1:26379"
+VALKEY_MASTER_NAME="mymaster"
+EXPECTED_VALKEY_NODES="3"
+VALKEY_TIMEOUT_SECONDS="5"
+```
+
+If your Valkey deployment requires authentication, also set:
+
+```
+VALKEY_SENTINEL_PASSWORD="sentinel-password"
+VALKEY_PASSWORD="valkey-password"
 ```
 
 Create the user in the database:
