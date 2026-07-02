@@ -16,8 +16,8 @@ Checks Galera node sync state:
 
 Checks overall Galera cluster health:
 
-* `200 OK`: cluster is Primary, this node is connected/ready/synced, and `wsrep_cluster_size` matches `EXPECTED_CLUSTER_SIZE`
-* `503 Service Unavailable`: cluster status is unhealthy, this node is not synced/ready/connected, or the online member count does not match `EXPECTED_CLUSTER_SIZE`
+* `200 OK`: cluster is Primary, this node is connected/ready/synced, and `wsrep_cluster_size` matches `cluster.expected_size`
+* `503 Service Unavailable`: cluster status is unhealthy, this node is not synced/ready/connected, or the online member count does not match `cluster.expected_size`
 * `500 Internal Server Error`: cluster status data collection failed
 
 The payload includes `state`, `status`, `expected_cluster_size`, `cluster_size`, and the checked `wsrep_*` status variables.
@@ -26,11 +26,12 @@ The payload includes `state`, `status`, `expected_cluster_size`, `cluster_size`,
 
 Returns storage/filesystem state and status as JSON.  
 The payload includes an overall `state`/`status` plus per-filesystem entries with mount point, type, capacity, utilization, and per-filesystem `state`/`status`.
+When Proxmox is configured, the same response also includes Ceph cluster health from the Proxmox API and SMART status for all drives reported by all online Proxmox nodes.
 
 Response codes:
 
 * `200 OK`: storage checks are healthy or warning-level
-* `503 Service Unavailable`: one or more filesystems are critical/error
+* `503 Service Unavailable`: one or more filesystems, Ceph checks, or SMART checks are critical/error
 * `500 Internal Server Error`: storage data collection failed
 
 ### `GET /valkey`
@@ -91,37 +92,63 @@ sudo cp clustercheck /opt/clustercheck/
 
 ### 5. Create Configuration File
 
-Create the configuration file that will store environment variables used to configure the service.
+Create the YAML configuration file used to configure the service.
 
 ```bash
 sudo mkdir -p /etc/clustercheck
-sudo touch /etc/clustercheck/config
+sudo touch /etc/clustercheck/config.yaml
 sudo chown -R clustercheck:clustercheck /etc/clustercheck
 ```
 
-Now, edit the configuration file to add your DSN. Replace the placeholder with your actual MariaDB/MySQL connection string.
+Now, edit the configuration file. Replace the placeholder values with your actual MariaDB/MySQL connection settings.
 
 ```bash
-sudo nano /etc/clustercheck/config
+sudo nano /etc/clustercheck/config.yaml
 ```
 
-Add the following line to the file:
+Add the following YAML to the file:
 
-```
-DSN="cluster_monitor:password@tcp(127.0.0.1:3306)/"
-EXPECTED_CLUSTER_SIZE="3"
-VALKEY_SENTINEL_ADDRS="127.0.0.1:26379"
-VALKEY_MASTER_NAME="mymaster"
-EXPECTED_VALKEY_NODES="3"
-VALKEY_TIMEOUT_SECONDS="5"
+```yaml
+http:
+  bind_address: ":8080"
+
+database:
+  server: "127.0.0.1:3306"
+  user: "cluster_monitor"
+  password: "password"
+  db: ""
+
+cluster:
+  expected_size: 3
+
+valkey:
+  sentinel_addrs:
+    - "127.0.0.1:26379"
+  master_name: "mymaster"
+  expected_nodes: 3
+  timeout: 5s
+
+proxmox:
+  endpoint: "https://p1.acme.com:8006"
+  api_token: "root@pam!clustercheck=token-secret"
+  timeout: 10s
 ```
 
-If your Valkey deployment requires authentication, also set:
+If your Valkey deployment requires authentication, also add these fields under the existing `valkey:` section:
 
+```yaml
+  sentinel_password: "sentinel-password"
+  password: "valkey-password"
 ```
-VALKEY_SENTINEL_PASSWORD="sentinel-password"
-VALKEY_PASSWORD="valkey-password"
-```
+
+If you already have a MySQL connection string, you can use `database.connect_string` instead of the structured `database.server`, `database.user`, `database.password`, and `database.db` fields. The service reads `/etc/clustercheck/config.yaml` by default; set the `CONFIG` environment variable to point at a different file.
+
+The Proxmox API token is sent as an API token authorization header. You may include either the full `PVEAPIToken=...` value or just the token portion, such as `root@pam!clustercheck=token-secret`. When Proxmox is configured, `/storage` queries:
+
+* `/api2/json/cluster/ceph/status`
+* `/api2/json/cluster/status`
+* `/api2/json/nodes/{node}/disks/list`
+* `/api2/json/nodes/{node}/disks/smart?disk={device}`
 
 Create the user in the database:
 

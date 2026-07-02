@@ -9,7 +9,7 @@ User=clustercheck
 Group=clustercheck
 WorkingDirectory=/opt/clustercheck
 ExecStart=/opt/clustercheck/clustercheck
-EnvironmentFile=/etc/clustercheck/config
+Environment=CONFIG=/etc/clustercheck/config.yaml
 Restart=on-failure
 
 [Install]
