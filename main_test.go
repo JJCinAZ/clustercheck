@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"database/sql"
 	"fmt"
 	"net"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jjcinaz/serverconfig"
 )
 
 type fakeRESPServer struct {
@@ -172,6 +175,25 @@ func writeTempConfig(t *testing.T, body string) string {
 		t.Fatalf("write temp config: %v", err)
 	}
 	return path
+}
+
+func TestInitDBConfiguresBoundedPool(t *testing.T) {
+	var (
+		database *sql.DB
+		err      error
+	)
+
+	database, err = initDB(serverconfig.MySQLDatabase{ConnectString: "user:password@tcp(127.0.0.1:3306)/"})
+	if err != nil {
+		t.Fatalf("initialize database: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = database.Close()
+	})
+
+	if database.Stats().MaxOpenConnections != databaseMaxOpenConnections {
+		t.Fatalf("unexpected maximum open connections: got %d, want %d", database.Stats().MaxOpenConnections, databaseMaxOpenConnections)
+	}
 }
 
 func TestLoadConfigReadsYAML(t *testing.T) {

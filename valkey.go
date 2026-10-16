@@ -14,6 +14,7 @@ import (
 )
 
 type valkeyHealthConfig struct {
+	Address          string        `yaml:"address" env:"VALKEY_ADDRESS"`
 	SentinelAddrs    []string      `yaml:"sentinel_addrs" env:"VALKEY_SENTINEL_ADDRS"`
 	MasterName       string        `yaml:"master_name" env:"VALKEY_MASTER_NAME"`
 	ExpectedNodes    int           `yaml:"expected_nodes" env:"EXPECTED_VALKEY_NODES"`
@@ -24,6 +25,7 @@ type valkeyHealthConfig struct {
 	masterNameSet    bool
 	expectedNodesSet bool
 	timeoutSet       bool
+	addressSet       bool
 }
 
 type valkeyNodeStatus struct {
@@ -71,6 +73,14 @@ func validateValkeyHealthConfig(config *valkeyHealthConfig) error {
 		port    int
 		err     error
 	)
+
+	if !config.addressSet && config.Address == "" {
+		config.Address = "127.0.0.1:6379"
+	}
+	config.Address = strings.TrimSpace(config.Address)
+	if err = validateTCPAddress("valkey.address", config.Address); err != nil {
+		return err
+	}
 
 	if !config.sentinelAddrsSet {
 		if len(config.SentinelAddrs) == 0 {

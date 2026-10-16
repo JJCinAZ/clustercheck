@@ -1,7 +1,65 @@
 # Galera Clustercheck Service
 
-This Go service provides an HTTP endpoint to check the status of a Galera cluster node by querying its `wsrep_local_state`. It returns an HTTP 200 (OK) if the node is synced (`wsrep_local_state` is `4`), and an HTTP 503 (Service Unavailable) if it is desynced. 
-This is intended to be used with load balancers like HAProxy and in place of a cluster-check bash script executed by `xinetd` or `systemd-socket-proxyd`.
+This Go service provides HTTP health endpoints and separate plain TCP health ports for Galera and Valkey nodes. It supports load balancers such as Traefik and HAProxy, replacing cluster-check scripts executed by `xinetd` or `systemd-socket-proxyd`.
+
+## TCP health checks
+
+The service listens on two additional ports by default. Connect without sending a request; it checks the backend, writes a single line on success, then closes the connection. These are plain TCP responses with no HTTP headers.
+
+| Port | Success response | Requirements |
+| --- | --- | --- |
+| 9200 | `OK\r\n` | Galera is Primary, connected, synced (`wsrep_local_state=4`), ready, has replication enabled (`wsrep_on=ON`), has `read_only=OFF`, has `super_read_only=OFF` if supported, and has `wsrep_reject_queries=NONE`. |
+| 9201 | `role:master\r\n` | The node at `valkey.address` returns `master` from `ROLE`. Uses `valkey.password` for authentication if configured. |
+
+An unhealthy node, backend error, or timeout closes the connection without a success response. Every connection performs a fresh check. `tcp.timeout` bounds the entire backend check and response (default 2 seconds); each listener permits at most 32 concurrent checks and closes excess connections.
+
+The Galera TCP check measures this node's write readiness through status and configuration; it does not issue a test write or require the full `cluster.expected_size` to be online. A healthy Primary component can continue serving writes during a member outage. The Valkey TCP check reads the target node's own role, independently of the cluster-wide Sentinel checks on `/valkey`; it does not provide Sentinel consensus or fence an isolated former master.
+
+Run clustercheck on each backend host, pointing `database.server` and `valkey.address` at the corresponding data nodes. `valkey.address` defaults to `127.0.0.1:6379`; it must point directly to a data node, rather than a Sentinel or load balancer. The database settings and HTTP routes continue to work as before.
+
+Configure listeners under `tcp:` as shown below. Explicitly set either bind address to `""` to disable that listener. Environment overrides are `GALERA_TCP_BIND_ADDRESS`, `VALKEY_TCP_BIND_ADDRESS`, `TCP_HEALTH_TIMEOUT`, and `VALKEY_ADDRESS`.
+
+To check manually:
+
+```bash
+nc -w 3 127.0.0.1 9200  # OK on a writable Galera node
+nc -w 3 127.0.0.1 9201  # role:master on a Valkey master
+```
+
+### Traefik configuration
+
+Use the health port as `healthCheck.port` while keeping each backend's actual data port in `servers`. Set `expect` so that closing an unhealthy connection fails the check; a connection-only check would still succeed when the health listener accepts it. No `send` payload is needed. See [Traefik TCP health checks](https://doc.traefik.io/traefik/reference/routing-configuration/tcp/service/#health-check).
+
+Add these services to your Traefik dynamic configuration and reference them from your TCP routers:
+
+```yaml
+tcp:
+  services:
+    galera:
+      loadBalancer:
+        servers:
+          - address: "192.168.91.11:3306"
+          - address: "192.168.91.12:3306"
+          - address: "192.168.91.13:3306"
+        healthCheck:
+          port: 9200
+          expect: "OK"
+          interval: 5s
+          timeout: 3s
+    valkey-master:
+      loadBalancer:
+        servers:
+          - address: "192.168.91.11:6379"
+          - address: "192.168.91.12:6379"
+          - address: "192.168.91.13:6379"
+        healthCheck:
+          port: 9201
+          expect: "role:master"
+          interval: 5s
+          timeout: 3s
+```
+
+Set Traefik's timeout higher than `tcp.timeout` to leave time for the response. Allow Traefik to reach the configured health ports on every backend host.
 
 ## Endpoints
 
@@ -112,6 +170,11 @@ Add the following YAML to the file:
 http:
   bind_address: ":8080"
 
+tcp:
+  galera_bind_address: ":9200"
+  valkey_bind_address: ":9201"
+  timeout: 2s
+
 database:
   server: "127.0.0.1:3306"
   user: "cluster_monitor"
@@ -122,6 +185,7 @@ cluster:
   expected_size: 3
 
 valkey:
+  address: "127.0.0.1:6379"
   sentinel_addrs:
     - "127.0.0.1:26379"
   master_name: "mymaster"

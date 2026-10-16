@@ -4,9 +4,16 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jjcinaz/serverconfig"
+)
+
+const (
+	databaseMaxOpenConnections = 10
+	databaseConnectionLifetime = 3 * time.Minute
+	databaseConnectionIdleTime = time.Minute
 )
 
 type App struct {
@@ -24,6 +31,10 @@ func initDB(config serverconfig.MySQLDatabase) (*sql.DB, error) {
 	if db, err = sql.Open("mysql", config.ConnectString); err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(databaseMaxOpenConnections)
+	db.SetMaxIdleConns(databaseMaxOpenConnections)
+	db.SetConnMaxLifetime(databaseConnectionLifetime)
+	db.SetConnMaxIdleTime(databaseConnectionIdleTime)
 	return db, nil
 }
 
@@ -42,6 +53,7 @@ func main() {
 	if db, err = initDB(config.Database); err != nil {
 		log.Fatal(err)
 	}
+	defer db.Close()
 	log.Printf("Using database server: %s", config.Database.Server)
 
 	app.DB = db
@@ -54,8 +66,7 @@ func main() {
 	mux.HandleFunc("/storage", app.storageStatusHandler)
 	mux.HandleFunc("/valkey", app.valkeyHealthHandler)
 
-	log.Printf("Starting clustercheck server on %s", config.Server.BindAddress)
-	if err = http.ListenAndServe(config.Server.BindAddress, mux); err != nil {
+	if err = app.serve(mux); err != nil {
 		log.Fatalf("Error starting server: %v", err)
 	}
 }

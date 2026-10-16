@@ -1,6 +1,6 @@
 [Unit]
 Description=Galera Cluster Status Checker
-After=network.target mysql.service
+After=network-online.target mysql.service
 Requires=mysql.service
 
 [Service]

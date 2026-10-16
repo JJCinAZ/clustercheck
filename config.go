@@ -17,6 +17,7 @@ const defaultConfigPath = "/etc/clustercheck/config.yaml"
 
 type clustercheckConfig struct {
 	Server   httpServerSettings         `yaml:"http"`
+	TCP      tcpHealthSettings          `yaml:"tcp"`
 	Database serverconfig.MySQLDatabase `yaml:"database"`
 	Cluster  clusterSettings            `yaml:"cluster"`
 	Valkey   valkeyHealthConfig         `yaml:"valkey"`
@@ -119,6 +120,7 @@ func (config *valkeyHealthConfig) UnmarshalYAML(value *yaml.Node) error {
 	config.masterNameSet = yamlKeySet(value, "master_name")
 	config.expectedNodesSet = yamlKeySet(value, "expected_nodes")
 	config.timeoutSet = yamlKeySet(value, "timeout")
+	config.addressSet = yamlKeySet(value, "address")
 	return nil
 }
 
@@ -218,6 +220,9 @@ func validateConfig(config *clustercheckConfig) error {
 	var err error
 
 	if err = validateHTTPServerSettings(&config.Server); err != nil {
+		return err
+	}
+	if err = validateTCPHealthSettings(&config.TCP); err != nil {
 		return err
 	}
 	if err = validateClusterSettings(&config.Cluster); err != nil {
